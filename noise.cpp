@@ -26,10 +26,8 @@
 
 SNDFILE* SIGNAL;
 SNDFILE* WRITE;
-SNDFILE* PREDICTION;
 SF_INFO SFINFO_WRITE;
 SF_INFO SFINFO_SIGNAL;
-SF_INFO SFINFO_PREDICTION;
 
 typedef struct _bit_stream {
     char* buf;
@@ -38,7 +36,7 @@ typedef struct _bit_stream {
     size_t bit;
 } bit_stream;
 
-void process_data_encode(SNDFILE* input,SNDFILE* processed , torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
+void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
 void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* module);
 void process_channel(float* data, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder, FILE* write);
 void window_hann(float* data, float* transformed_data, int window_size);
@@ -55,38 +53,34 @@ void zip(float* data, size_t len);
 int main(int argc, char* argv[])
 {
     SIGNAL = NULL;
-    PREDICTION = NULL;
     memset(&SFINFO_SIGNAL, 0, sizeof(SFINFO_SIGNAL));
-    memset(&SFINFO_PREDICTION, 0, sizeof(SFINFO_PREDICTION));
 
-    if(argc > 3)
+    if(argc > 5)
     {
         torch::NoGradGuard no_grad;
-        torch::jit::script::Module encoder = torch::jit::load(argv[3]);
-        torch::jit::script::Module decoder = torch::jit::load(argv[4]);
+        torch::jit::script::Module encoder = torch::jit::load(argv[2]);
+        torch::jit::script::Module decoder = torch::jit::load(argv[3]);
 
         encoder.eval();
         decoder.eval();
 
         open_sf_read(argv[1], &SIGNAL, &SFINFO_SIGNAL);
-        open_sf_read(argv[2], &PREDICTION, &SFINFO_PREDICTION);
-        open_sf_write(argv[5], &WRITE, &SFINFO_WRITE);
+        open_sf_write(argv[4], &WRITE, &SFINFO_WRITE);
 
-        FILE* decode = fopen(argv[6], "r");
+        FILE* decode = fopen(argv[5], "r");
 
-        //process_data_encode(SIGNAL, PREDICTION, &encoder, &decoder);
-        process_data_decode(WRITE, decode, &decoder);
+        process_data_encode(SIGNAL, &encoder, &decoder);
+        //process_data_decode(WRITE, decode, &decoder);
 
         fclose(decode);
 
         sf_close(SIGNAL);
-        sf_close(PREDICTION);
 
         return 0;
     }
     else
     {
-        printf("Enter Signal file and Prediction file! Also module file\n");
+        printf("Enter Signal file, encoder and decoder module! Also file to write and to decode!\n");
         return LACK_OF_FILES;
     }
 }
@@ -232,17 +226,14 @@ void unzip(float* data, size_t len)
 
 void move_second_part(float* data, size_t len)
 {
-    for (int i = 0; i < len/2; i++)
-        data[i] = data[len/2 + i];
+    memcpy(data, data + len/2, sizeof(float)*len/2);
 }
 
 void move_third_part(float* data, size_t len)
 {
-    for (int i = 0; i < len/3; i++)
-        data[i] = data[2*len/3 + i];
+    memcpy(data, data + 2*len/3, sizeof(float)*len/3);
 
-    for (int i = 0; i < 2*len/3; i++)
-        data[len/3 + i] = 0;
+    memset(data + len/3, 0, 2*len/3*sizeof(float));
 }
 
 void fbprint(FILE* file, float m, int po2, bit_stream* bs){
@@ -434,7 +425,7 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
     }
 }
 
-void process_data_encode(SNDFILE* input, SNDFILE* processed, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder)
+void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder)
 {
     int k = 0;
     int readcount = 0;
