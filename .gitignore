@@ -1,0 +1,7 @@
+*.wav
+*.out
+*.txt
+*.mp3
+*.log
+build
+*.o
