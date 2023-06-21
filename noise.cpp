@@ -146,7 +146,7 @@ int open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info)
     memset(sf_file_info, 0, sizeof(*sf_file_info));
 
     sf_file_info->format = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
-    sf_file_info->channels = 1;
+    sf_file_info->channels = 1;                             //?????
     sf_file_info->samplerate = 44100;
 
     if (!(*sf_file = sf_open(file, SFM_WRITE, sf_file_info)))
@@ -279,7 +279,7 @@ void process_channel(float* data, torch::jit::script::Module* encoder, torch::ji
         auto output = decoder->forward({encoded}).toTensor();
 
         for (int i = 0; i < BUFFER_LEN; i++)
-            data[i] = output[0][i].item<float>();         
+            data[i] = output[0][i].item<float>() * max_ampl;         
     }
     else
     {
@@ -316,7 +316,6 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
     pow_of_2 = 16384;
     //printf("%lld\n", mean);
 
-    
     for (int i = 0; i < BUFFER_LEN; i++)
         encode_rice(pow_of_2, loss[i], bs);
 
@@ -428,35 +427,25 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
 void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder)
 {
     int k = 0;
-    int readcount = 0;
-    float data1 [2*BUFFER_LEN];
+    float data1 [3*BUFFER_LEN] = {0};
     float data2 [BUFFER_LEN];
-    float buffer1 [3*BUFFER_LEN/2];
-    memset(buffer1, 0, 3*BUFFER_LEN*sizeof(float)/2);
-    float buffer2 [3*BUFFER_LEN/2];
-    memset(buffer2, 0, 3*BUFFER_LEN*sizeof(float)/2);
+    float buffer1 [3*BUFFER_LEN/2] = {0};
+    float buffer2 [3*BUFFER_LEN/2] = {0};
     int size_to_read = BUFFER_LEN;
     float* place_to_read = data1;
-    FILE* music = NULL;
-    music = fopen("music.f1", "wb");
+    FILE* music = fopen("music.f1", "wb");
 
-    //open_sf_write("test.wav", &WRITE, &SFINFO_WRITE);
-
-    while (readcount = sf_readf_float(input, place_to_read, size_to_read))
+    while (sf_readf_float(input, place_to_read, size_to_read))
     {   
         bit_stream bs;
         bit_stream_init(&bs);
         k++;
-        /*float test[2*BUFFER_LEN];
-        sf_readf_float(processed, test, size_to_read);
-        zip(test, sizeof(test)/sizeof(float));*/
 
         zip(data1, sizeof(data1)/sizeof(float));
-        
-        for (int i = 0; i < BUFFER_LEN; i++)
-            data2[i] = data1[i];
 
-        process_channel(data2, encoder, decoder, music);
+        memcpy(data2, data1 + ((k + 1) % 2)*BUFFER_LEN/2, BUFFER_LEN*sizeof(float));
+
+        process_channel(data2, encoder, decoder, music);           //check whether I should write here params or I should write it every 2 steps
 
         if ((k % 2))
         {
@@ -468,15 +457,9 @@ void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, to
             for (int i = 0; i < BUFFER_LEN; i++)
                 buffer1[(BUFFER_LEN/2) + i] += data2[i];
 
-            //sf_write_float(WRITE, buffer1, BUFFER_LEN);
-
             float loss[BUFFER_LEN];
             for (int i = 0; i < BUFFER_LEN; i++)
                 loss[i] = buffer1[i] - data1[i];
-
-            /*for (int i = 0; i < BUFFER_LEN; i++)
-                printf("%lg ", test[i]);
-            printf("\n");*/
 
             write_loss(loss, &bs, music);
             move_third_part(buffer1, 3*BUFFER_LEN/2);
@@ -485,9 +468,7 @@ void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, to
             bs.len = 0;
         }       
 
-
-        for (int i = 0; i < BUFFER_LEN; i++)
-            data2[i] = data1[BUFFER_LEN + i];
+        memcpy(data2, data1 + 3*BUFFER_LEN/2 + ((k + 1) % 2)*BUFFER_LEN/2, BUFFER_LEN*sizeof(float));
 
         process_channel(data2, encoder, decoder, music);
 
@@ -503,7 +484,8 @@ void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, to
 
             float loss[BUFFER_LEN];
             for (int i = 0; i < BUFFER_LEN; i++)
-                loss[i] = buffer2[i] - data1[i];
+                loss[i] = buffer2[i] - data1[i + 3*BUFFER_LEN/2];
+
             write_loss(loss, &bs, music);
             move_third_part(buffer2, 3*BUFFER_LEN/2);
 
@@ -512,13 +494,19 @@ void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, to
         }       
 
         unzip(data1, sizeof(data1)/sizeof(float));
-        move_second_part(data1, sizeof(data1)/sizeof(float));
+
+        if (k % 2)
+        {
+            place_to_read = data1 + 2*BUFFER_LEN;
+        }
+        else
+        {
+            move_third_part(data1, 3*BUFFER_LEN);
+            place_to_read = data1 + BUFFER_LEN;
+        }
 
         if(k == 1)
-        {
             size_to_read /= 2;
-            place_to_read += BUFFER_LEN;
-        }
 
         free(bs.buf);
     }
