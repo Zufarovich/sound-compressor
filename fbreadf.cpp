@@ -64,10 +64,10 @@ void fbread_answer_version(FILE* file, Answer* ans){
 }
 
 
-void fbread(FILE* file, float* m, float* delta){
+void fbread(FILE* file, float* scale, float* delta){
     Answer ans;
     fbread_answer_version(file, &ans);
-    *m = ans.m;
+    *scale = ans.m;
     for(int i = 0; i<FRAME_LEN; i++)
         delta[i] = ans.delta[i];
 }
