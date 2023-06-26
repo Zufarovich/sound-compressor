@@ -70,7 +70,7 @@ int main(int argc, char* argv[])
 
         FILE* decode = fopen(argv[5], "r");
 
-        process_data_encode(SIGNAL, &encoder, &decoder);
+        //process_data_encode(SIGNAL, &encoder, &decoder);
         //process_data_decode(WRITE, decode, &decoder);
 
         fclose(decode);
