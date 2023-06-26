@@ -5,3 +5,9 @@
 *.log
 build
 *.o
+noise
+*.f1
+*.pth
+*.cmake
+Makefile
+CMakeFiles/
