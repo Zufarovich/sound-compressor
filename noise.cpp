@@ -71,7 +71,7 @@ int main(int argc, char* argv[])
         FILE* decode = fopen(argv[5], "r");
 
         //process_data_encode(SIGNAL, &encoder, &decoder);
-        //process_data_decode(WRITE, decode, &decoder);
+        process_data_decode(WRITE, decode, &decoder);
 
         fclose(decode);
 
@@ -443,6 +443,11 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
         readcount = fread(buf_channel1, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
         readcount = fread(buf_channel2, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
         readcount = fread(buf_channel1 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+
+        for (int i = 0; i < 2*COMPRESSED_PARAMETERS; i++)
+            printf("%lg ", buf_channel1[i]);
+
+        printf("\n");
 
         fbread(file_to_decode, &max_loss1, loss1);
 
