@@ -13,6 +13,7 @@ void fbread_answer_version(FILE* file, Answer* ans){
     int po2 = 0;
     fread(&m, sizeof(float), 1, file);
     fread(&po2, sizeof(int), 1, file);
+    printf("pow_of_2:%d\n", po2);
     char buffer = 0;
     int count = 0;
     int position = 0;
