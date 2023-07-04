@@ -11,8 +11,7 @@
 #include <stdbool.h>
 #include <torch/script.h>
 #include <vector>
-#include "BEwriter.h"
-#include "fbreadf.h"
+#include "rice_code.h"
 
 #define DISCRETE_FACTOR INT_MAX
 #define BUFFER_LEN 1024
@@ -29,27 +28,17 @@ SNDFILE* WRITE;
 SF_INFO  SFINFO_WRITE;
 SF_INFO  SFINFO_SIGNAL;
 
-typedef struct _bit_stream {
-    char*  buf;
-    size_t len;
-    size_t cap;
-    size_t bit;
-} bit_stream;
-
 void  process_channel(float* data, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder, FILE* write);
 void  process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
 void  process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* module);
-void save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write);
+void  save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write);
 void  decode_sample(float* result, float* input, torch::jit::script::Module* decoder);
 void  window_hann(float* data, float* transformed_data, int window_size);
 int   open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info);
 int   open_sf_read(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info);
-void  write_loss(float* data, bin_arr* bs, FILE* output);
-void  encode_rice(size_t po2, int delta, bit_stream* bs);
 float find_probability(long* data, size_t len);
 void  move_second_part(float* data, size_t len);
 void  move_third_part(float* data, size_t len);
-void  bit_stream_set(bit_stream* bs, int set);
 float find_max(float* loss, size_t len);
 void  unzip(float* data, size_t len);
 void  bit_stream_init(bit_stream* bs);
@@ -74,13 +63,8 @@ int main(int argc, char* argv[])
 
         FILE* decode = fopen(argv[5], "r");
 
-        process_data_encode(SIGNAL, &encoder, &decoder);
+        //process_data_encode(SIGNAL, &encoder, &decoder);
         //process_data_decode(WRITE, decode, &decoder);
-
-        /*bit_stream bs;
-        bit_stream_init(&bs);
-
-        encode_rice()*/
 
         fclose(decode);
 
@@ -92,48 +76,6 @@ int main(int argc, char* argv[])
     {
         printf("Enter Signal file, encoder and decoder module! Also file to write and to decode!\n");
         return LACK_OF_FILES;
-    }
-}
-
-void bit_stream_init(bit_stream* bs) {
-    bs->buf = (char*)malloc(1024);
-    memset(bs->buf, '\0', 1024);
-    bs->len = 0;
-    bs->cap = 1024;
-    bs->bit = 0;
-}
-
-void bit_stream_set(bit_stream* bs, int set) {
-    size_t byte = bs->bit / 8;
-    size_t bit = bs->bit  % 8;
-    if ( byte >= bs->cap )
-    {  
-        bs->buf = (char*)realloc(bs->buf, bs->cap *= 2);
-        memset(bs->buf + bs->cap/2, '\0', bs->cap/2);
-    }
-    bs->buf[byte] = set ? bs->buf[byte] | (1<<bit) : bs->buf[byte] & ~(1<<bit);
-    if ( bs->bit > bs->len) bs->len = bs->bit;
-    bs->bit++;
-}
-
-void encode_rice(size_t po2, int delta, bit_stream* bs) {
-    if ( delta == 0) {
-        bit_stream_set(bs, 0);
-    } else {
-        bit_stream_set(bs, 1);
-        bit_stream_set(bs, delta > 0);
-        int k = delta;
-        while ( k > 0 && k >= po2) {
-            bit_stream_set(bs, 1);
-            k -= po2;
-        }
-        bit_stream_set(bs, 0);
-        int b = 0;
-        while (po2) {
-            bit_stream_set(bs, delta & (1<<b));
-            po2 /= 2;
-            b++;        
-        }
     }
 }
 
@@ -250,19 +192,6 @@ void move_third_part(float* data, size_t len)
     memset(data + len/3, 0, 2*len/3*sizeof(float));
 }
 
-void fbprint(FILE* file, float scale, int po2, bit_stream* bs){
-    fwrite(&scale, sizeof(float), 1, file);
-    fwrite(&po2, sizeof(int), 1, file);
-    char buffer = 0;
-    for(int i = 0; i<bs->bit; i++){
-        buffer = (buffer) | ((bs->buf[i])<<(i%8));
-        if(i==bs->bit-1 || (i%8==7)){
-            fputc(buffer, file);
-            buffer = 0;
-        }
-    }
-}
-
 void process_channel(float* data, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder, FILE* write)
 {
     torch::Tensor inputs = torch::empty({1, BUFFER_LEN});
@@ -338,7 +267,7 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
     for (int i = 0; i < BUFFER_LEN; i++)
         encode_rice(pow_of_2, loss[i], bs);
 
-    fbprint(output, max_loss, pow_of_2, bs);
+    print_loss(output, max_loss, pow_of_2, bs);
 }
 
 void decode_sample(float* result, float* input, torch::jit::script::Module* decoder)
@@ -386,12 +315,13 @@ void save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, 
 void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder)
 {
     int    k = 0;
+    int    size_to_read = BUFFER_LEN;
     float  data1   [3*BUFFER_LEN]   = {0};
     float  data2   [BUFFER_LEN];
     float  buffer1 [3*BUFFER_LEN/2] = {0};
     float  buffer2 [3*BUFFER_LEN/2] = {0};
-    int    size_to_read = BUFFER_LEN;
     float* place_to_read = data1;
+
     FILE* music = fopen("music.f1", "wb");
 
     while (sf_readf_float(input, place_to_read, size_to_read))
@@ -453,11 +383,11 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
         readcount = fread(buf_channel2,                         sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
         readcount = fread(buf_channel1 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
 
-        fbread(file_to_decode, &max_loss1, loss1);
+        read_loss(file_to_decode, &max_loss1, loss1);
 
         readcount = fread(buf_channel2 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
 
-        fbread(file_to_decode, &max_loss2, loss2);
+        read_loss(file_to_decode, &max_loss2, loss2);
         
         decode_sample(saved_channel1               , buf_channel1             , decoder);
         decode_sample(saved_channel1 + BUFFER_LEN/2, buf_channel1 + BUFFER_LEN, decoder);
