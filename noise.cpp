@@ -64,7 +64,7 @@ int main(int argc, char* argv[])
         FILE* decode = fopen(argv[5], "r");
 
         //process_data_encode(SIGNAL, &encoder, &decoder);
-        //process_data_decode(WRITE, decode, &decoder);
+        process_data_decode(WRITE, decode, &decoder);
 
         fclose(decode);
 
@@ -214,11 +214,7 @@ void process_channel(float* data, torch::jit::script::Module* encoder, torch::ji
         for (int i = 0; i < COMPRESSED_PARAMETERS; i++)
             data[i] = params[0][i].item<float>();
 
-        fwrite(data, sizeof(float), COMPRESSED_PARAMETERS, write);
-
-        for (int i = 0; i < COMPRESSED_PARAMETERS; i++)
-            printf("%lg ", data[i]);
-        printf("\n");
+        fwrite(data, sizeof(float), COMPRESSED_PARAMETERS, write);  
 
         for (int i = 0; i < COMPRESSED_PARAMETERS; i++)
             encoded[0][i] = data[i];
@@ -300,10 +296,6 @@ void save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, 
         for (int i = 0; i < BUFFER_LEN; i++)
             loss[i] = buffer[i] - data1[i];
 
-        for (int i = 0; i < BUFFER_LEN; i++)
-            printf("%lg ", loss[i]);
-        printf("\n");
-
         write_loss(loss, bs, to_write);
         move_third_part(buffer, 3*BUFFER_LEN/2);
 
@@ -332,16 +324,12 @@ void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, to
 
         zip(data1, sizeof(data1)/sizeof(float));
 
-        printf("Channel1:\n");
         memcpy(data2, data1 + ((k + 1) % 2)*BUFFER_LEN/2                 , BUFFER_LEN*sizeof(float));
         process_channel(data2, encoder, decoder, music);
-        printf("Loss channel1:\n");
         save_loss(k, buffer1, data2, data1, &bs, music);     
 
-        printf("Channel2:\n");
         memcpy(data2, data1 + 3*BUFFER_LEN/2 + ((k + 1) % 2)*BUFFER_LEN/2, BUFFER_LEN*sizeof(float));
         process_channel(data2, encoder, decoder, music); 
-        printf("Loss channel2:\n");
         save_loss(k, buffer2, data2, data1, &bs, music);     
 
         unzip(data1, sizeof(data1)/sizeof(float));

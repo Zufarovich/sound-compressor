@@ -11,3 +11,4 @@ noise
 *.cmake
 Makefile
 CMakeFiles/
+.vscode

@@ -65,7 +65,7 @@ void read_loss(FILE* file, float* scale, float* loss)
 
     fread(&m  , sizeof(float), 1, file);
     fread(&po2, sizeof(int)  , 1, file);
-    printf("%d\n", po2);
+    //printf("%d\n", po2);
 
     while (count < BUFFER_LEN)
     {   
@@ -78,7 +78,7 @@ void read_loss(FILE* file, float* scale, float* loss)
             count++;
         }
         else
-        {
+        {   
             position++;
             check_end;
 
@@ -127,7 +127,7 @@ void print_loss(FILE* file, float scale, int po2, bit_stream* bs)
     fwrite(&scale, sizeof(float), 1, file);
     fwrite(&po2, sizeof(int), 1, file);
 
-    size_t byte_to_read = bs->len % 8 ? bs->len / 8 + 1 : bs->len / 8;
+    size_t byte_to_read = bs->bit % 8 ? bs->bit / 8 + 1 : bs->bit / 8;
 
     for (int i = 0; i < byte_to_read; i++)
         fputc(bs->buf[i], file);
