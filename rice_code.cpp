@@ -57,15 +57,13 @@ void encode_rice(size_t po2, int delta, bit_stream* bs) {
 
 void read_loss(FILE* file, float* scale, float* loss)
 {
-    float m = 0;
     int   po2, count, position;
     char  buffer = 0;
 
     po2 = count = position = 0;
 
-    fread(&m  , sizeof(float), 1, file);
+    fread(scale  , sizeof(float), 1, file);
     fread(&po2, sizeof(int)  , 1, file);
-    //printf("%d\n", po2);
 
     while (count < BUFFER_LEN)
     {   

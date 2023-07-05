@@ -32,7 +32,7 @@ void  process_channel(float* data, torch::jit::script::Module* encoder, torch::j
 void  process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
 void  process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* module);
 void  save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write);
-void  decode_sample(float* result, float* input, torch::jit::script::Module* decoder);
+void  decode_sample(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder);
 void  window_hann(float* data, float* transformed_data, int window_size);
 int   open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info);
 int   open_sf_read(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info);
@@ -214,7 +214,8 @@ void process_channel(float* data, torch::jit::script::Module* encoder, torch::ji
         for (int i = 0; i < COMPRESSED_PARAMETERS; i++)
             data[i] = params[0][i].item<float>();
 
-        fwrite(data, sizeof(float), COMPRESSED_PARAMETERS, write);  
+        fwrite(data     , sizeof(float), COMPRESSED_PARAMETERS, write); 
+        fwrite(&max_ampl, sizeof(float), 1                    , write); 
 
         for (int i = 0; i < COMPRESSED_PARAMETERS; i++)
             encoded[0][i] = data[i];
@@ -229,11 +230,8 @@ void process_channel(float* data, torch::jit::script::Module* encoder, torch::ji
         for (int i = 0; i < BUFFER_LEN; i++)
             data[i] = 0;
 
-        for (int i = 0; i < COMPRESSED_PARAMETERS; i++)
-            printf("%lg ", data[i]);
-        printf("\n");
-
-        fwrite(data, sizeof(float), COMPRESSED_PARAMETERS, write);
+        fwrite(data     , sizeof(float), COMPRESSED_PARAMETERS, write);
+        fwrite(&max_ampl, sizeof(float), 1                    , write);
     }
 
 }
@@ -266,7 +264,7 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
     print_loss(output, max_loss, pow_of_2, bs);
 }
 
-void decode_sample(float* result, float* input, torch::jit::script::Module* decoder)
+void decode_sample(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder)
 {
     torch::Tensor inputs = torch::empty({1, COMPRESSED_PARAMETERS});
 
@@ -276,7 +274,7 @@ void decode_sample(float* result, float* input, torch::jit::script::Module* deco
     auto output = decoder->forward({inputs}).toTensor();
 
     for (int i = 0; i < BUFFER_LEN; i++)
-        result[i] += output[0][i].item<float>();
+        result[i] += output[0][i].item<float>() * max_ampl;
 }
 
 void save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write)
@@ -363,35 +361,39 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
 
     while(readcount)
     {
-        float max_loss1, max_loss2;
+        float scale1, scale2, max_loss_ch1_1, max_loss_ch1_2, max_loss_ch2_1, max_loss_ch2_2;
         float loss1[BUFFER_LEN];
         float loss2[BUFFER_LEN];
 
         readcount = fread(buf_channel1,                         sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+        readcount = fread(&max_loss_ch1_1,                      sizeof(float), 1                    , file_to_decode);
         readcount = fread(buf_channel2,                         sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+        readcount = fread(&max_loss_ch2_1,                      sizeof(float), 1                    , file_to_decode);
         readcount = fread(buf_channel1 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+        readcount = fread(&max_loss_ch1_2,                      sizeof(float), 1                    , file_to_decode);
 
-        read_loss(file_to_decode, &max_loss1, loss1);
+        read_loss(file_to_decode, &scale1, loss1);
 
         readcount = fread(buf_channel2 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+        readcount = fread(&max_loss_ch2_2,                      sizeof(float), 1                    , file_to_decode);
 
-        read_loss(file_to_decode, &max_loss2, loss2);
+        read_loss(file_to_decode, &scale2, loss2);
         
-        decode_sample(saved_channel1               , buf_channel1             , decoder);
-        decode_sample(saved_channel1 + BUFFER_LEN/2, buf_channel1 + BUFFER_LEN, decoder);
-        decode_sample(saved_channel2               , buf_channel2             , decoder);
-        decode_sample(saved_channel2 + BUFFER_LEN/2, buf_channel2 + BUFFER_LEN, decoder);
+        decode_sample(saved_channel1               , buf_channel1             , max_loss_ch1_1, decoder);
+        decode_sample(saved_channel1 + BUFFER_LEN/2, buf_channel1 + BUFFER_LEN, max_loss_ch1_2, decoder);
+        decode_sample(saved_channel2               , buf_channel2             , max_loss_ch2_1, decoder);
+        decode_sample(saved_channel2 + BUFFER_LEN/2, buf_channel2 + BUFFER_LEN, max_loss_ch2_2, decoder);
         
         for (int i = 0; i < BUFFER_LEN; i++)
         {
-            loss1[i] = loss1[i]*max_loss1/SHRT_MAX;
-            loss2[i] = loss2[i]*max_loss2/SHRT_MAX;
+            loss1[i] = loss1[i] * scale1 / SHRT_MAX;
+            loss2[i] = loss2[i] * scale2 / SHRT_MAX;
         }
 
         for (int i = 0; i < BUFFER_LEN; i++)
         {
-            saved_channel1[i] += loss1[i];
-            saved_channel2[i] += loss2[i];
+            saved_channel1[i] -= loss1[i];
+            saved_channel2[i] -= loss2[i];
             save[2*i]          = saved_channel1[i];
             save[2*i + 1]      = saved_channel2[i];
         }
