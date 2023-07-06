@@ -101,7 +101,7 @@ int open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info)
 {
     memset(sf_file_info, 0, sizeof(*sf_file_info));
 
-    sf_file_info->format = SF_FORMAT_WAV | SF_FORMAT_PCM_16;
+    sf_file_info->format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
     sf_file_info->channels = 2;
     sf_file_info->samplerate = 44100;
 
@@ -223,7 +223,7 @@ void process_channel(float* data, torch::jit::script::Module* encoder, torch::ji
         auto output = decoder->forward({encoded}).toTensor();
 
         for (int i = 0; i < BUFFER_LEN; i++)
-            data[i] = output[0][i].item<float>() * max_ampl;         
+            data[i] = output[0][i].item<float>() * max_ampl;
     }
     else
     {
@@ -379,10 +379,10 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
 
         read_loss(file_to_decode, &scale2, loss2);
         
-        decode_sample(saved_channel1               , buf_channel1             , max_loss_ch1_1, decoder);
-        decode_sample(saved_channel1 + BUFFER_LEN/2, buf_channel1 + BUFFER_LEN, max_loss_ch1_2, decoder);
-        decode_sample(saved_channel2               , buf_channel2             , max_loss_ch2_1, decoder);
-        decode_sample(saved_channel2 + BUFFER_LEN/2, buf_channel2 + BUFFER_LEN, max_loss_ch2_2, decoder);
+        decode_sample(saved_channel1               , buf_channel1                        , max_loss_ch1_1, decoder);
+        decode_sample(saved_channel2               , buf_channel2                        , max_loss_ch2_1, decoder);
+        decode_sample(saved_channel1 + BUFFER_LEN/2, buf_channel1 + COMPRESSED_PARAMETERS, max_loss_ch1_2, decoder);
+        decode_sample(saved_channel2 + BUFFER_LEN/2, buf_channel2 + COMPRESSED_PARAMETERS, max_loss_ch2_2, decoder);
         
         for (int i = 0; i < BUFFER_LEN; i++)
         {
