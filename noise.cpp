@@ -28,8 +28,6 @@ SNDFILE* WRITE;
 SF_INFO  SFINFO_WRITE;
 SF_INFO  SFINFO_SIGNAL;
 
-int q = 1;
-
 void  process_channel(float* data, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder, FILE* write);
 void  process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
 void  process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* module);
