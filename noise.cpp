@@ -28,6 +28,8 @@ SNDFILE* WRITE;
 SF_INFO  SFINFO_WRITE;
 SF_INFO  SFINFO_SIGNAL;
 
+int q = 1;
+
 void  process_channel(float* data, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder, FILE* write);
 void  process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
 void  process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* module);
@@ -324,11 +326,11 @@ void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, to
 
         memcpy(data2, data1 + ((k + 1) % 2)*BUFFER_LEN/2                 , BUFFER_LEN*sizeof(float));
         process_channel(data2, encoder, decoder, music);
-        save_loss(k, buffer1, data2, data1, &bs, music);     
+        save_loss(k, buffer1, data2, data1                 , &bs, music);     
 
         memcpy(data2, data1 + 3*BUFFER_LEN/2 + ((k + 1) % 2)*BUFFER_LEN/2, BUFFER_LEN*sizeof(float));
         process_channel(data2, encoder, decoder, music); 
-        save_loss(k, buffer2, data2, data1, &bs, music);     
+        save_loss(k, buffer2, data2, data1 + 3*BUFFER_LEN/2, &bs, music);     
 
         unzip(data1, sizeof(data1)/sizeof(float));
 
@@ -383,7 +385,7 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
         decode_sample(saved_channel2               , buf_channel2                        , max_loss_ch2_1, decoder);
         decode_sample(saved_channel1 + BUFFER_LEN/2, buf_channel1 + COMPRESSED_PARAMETERS, max_loss_ch1_2, decoder);
         decode_sample(saved_channel2 + BUFFER_LEN/2, buf_channel2 + COMPRESSED_PARAMETERS, max_loss_ch2_2, decoder);
-        
+
         for (int i = 0; i < BUFFER_LEN; i++)
         {
             loss1[i] = loss1[i] * scale1 / SHRT_MAX;
@@ -401,8 +403,6 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
         move_third_part(saved_channel1, 3*BUFFER_LEN/2);
         move_third_part(saved_channel2, 3*BUFFER_LEN/2);
 
-        unzip(save, 2*BUFFER_LEN);
-
-        sf_write_float(output, save, 2*BUFFER_LEN);
+        sf_writef_float(output, save, BUFFER_LEN);
     }
 }
