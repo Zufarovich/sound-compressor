@@ -6,8 +6,7 @@
 build
 *.o
 noise
-*.f1
-*.pth
+*.nlac
 *.cmake
 Makefile
 CMakeFiles/
