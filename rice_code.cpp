@@ -2,7 +2,7 @@
 #include <stdlib.h>
 #include <cstring>
 
-#define check_end if (!(position % 8)) fread(&buffer, sizeof(char), 1, file)
+#define check_end if (!(position % 8)) readcount = fread(&buffer, sizeof(char), 1, file)
 #define bit_readen (buffer & (1 << (position % 8)))
 #define BUFFER_LEN 1024
 
@@ -35,29 +35,24 @@ void bit_stream_set(bit_stream* bs, int set) {
 }
 
 void encode_rice(size_t po2, int delta, bit_stream* bs) {
-    if ( delta == 0) {
-        bit_stream_set(bs, 0);
-    } else {
+    bit_stream_set(bs, delta > 0);
+    int k = abs(delta);
+    while ( k > 0 && k >= po2) {
         bit_stream_set(bs, 1);
-        bit_stream_set(bs, delta > 0);
-        int k = abs(delta);
-        while ( k > 0 && k >= po2) {
-            bit_stream_set(bs, 1);
-            k -= po2;
-        }
-        bit_stream_set(bs, 0);
-        int b = 0;
-        while (po2 - 1) {
-            bit_stream_set(bs, abs(delta) & (1<<b));
-            po2 /= 2;
-            b++;        
-        }
+        k -= po2;
+    }
+    bit_stream_set(bs, 0);
+    int b = 0;
+    while (po2 - 1) {
+        bit_stream_set(bs, abs(delta) & (1<<b));
+        po2 /= 2;
+        b++;        
     }
 }
 
 void read_loss(FILE* file, float* scale, float* loss)
 {
-    int   po2, count, position;
+    int   po2, count, position, readcount;
     char  buffer = 0;
 
     po2 = count = position = 0;
@@ -65,58 +60,46 @@ void read_loss(FILE* file, float* scale, float* loss)
     fread(scale  , sizeof(float), 1, file);
     fread(&po2, sizeof(int)  , 1, file);
 
-    while (count < BUFFER_LEN)
+    while (count < BUFFER_LEN && readcount)
     {   
         check_end;
 
-        if (!bit_readen)
+        int above_zero =  bit_readen ?  1 : -1;
+        
+        position++;
+        check_end;
+
+        int amount_of_one = 0;
+
+        while (bit_readen && readcount)
         {
-            loss[count] = 0;
+            amount_of_one++;
             position++;
-            count++;
+
+            check_end;
         }
-        else
-        {   
+
+        int current_po2 = 1;
+        int save_po2 = po2;
+        int modulo = 0;
+
+        while (save_po2 - 1 && readcount)
+        {
             position++;
             check_end;
 
-            int above_zero =  bit_readen ?  1 : -1;
-            
-            position++;
-            check_end;
+            if (bit_readen)
+                modulo += current_po2;
 
-            int amount_of_one = 0;
+            current_po2 *= 2;
 
-            while (bit_readen)
-            {
-                amount_of_one++;
-                position++;
-
-                check_end;
-            }
-
-            int current_po2 = 1;
-            int save_po2 = po2;
-            int modulo = 0;
-
-            while (save_po2 - 1)
-            {
-                position++;
-                check_end;
-
-                if (bit_readen)
-                    modulo += current_po2;
-
-                current_po2 *= 2;
-
-                save_po2 /= 2;
-            }
-
-            loss[count] = (po2*amount_of_one + modulo)*above_zero;
-
-            count++;
-            position++;
+            save_po2 /= 2;
         }
+
+        loss[count] = (po2*amount_of_one + modulo)*above_zero;
+
+        count++;
+        position++;
     }
 }
 
