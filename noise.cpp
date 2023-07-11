@@ -29,19 +29,19 @@ SF_INFO  SFINFO_WRITE;
 SF_INFO  SFINFO_SIGNAL;
 
 void  process_channel(float* data, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder, FILE* write);
-void  process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
+void  process_data_encode(char* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
+void  decode_sample(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder);
 void  process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* module);
 void  save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write);
-void  decode_sample(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder);
 void  window_hann(float* data, float* transformed_data, int window_size);
 int   open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info);
 int   open_sf_read(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info);
-float find_probability(long* data, size_t len);
 void  move_second_part(float* data, size_t len);
 void  move_third_part(float* data, size_t len);
 float find_max(float* loss, size_t len);
-void  unzip(float* data, size_t len);
+int   find_mean(int* data, size_t len);
 void  bit_stream_init(bit_stream* bs);
+void  unzip(float* data, size_t len);
 void  zip(float* data, size_t len);
 
 int main(int argc, char* argv[])
@@ -49,32 +49,52 @@ int main(int argc, char* argv[])
     SIGNAL = NULL;
     memset(&SFINFO_SIGNAL, 0, sizeof(SFINFO_SIGNAL));
 
-    if(argc > 5)
+    if(argc > 1)
     {
         torch::NoGradGuard no_grad;
-        torch::jit::script::Module encoder = torch::jit::load(argv[2]);
-        torch::jit::script::Module decoder = torch::jit::load(argv[3]);
+        torch::jit::script::Module decoder = torch::jit::load("decoder.pth");
 
-        encoder.eval();
-        decoder.eval();
+        if (!strcmp(argv[1], "-e")){
+            torch::jit::script::Module encoder = torch::jit::load("encoder.pth");
 
-        open_sf_read (argv[1], &SIGNAL, &SFINFO_SIGNAL);
-        open_sf_write(argv[4], &WRITE, &SFINFO_WRITE);
+            encoder.eval();
+            decoder.eval();
 
-        FILE* decode = fopen(argv[5], "r");
+            if (argc > 2){
+                process_data_encode(argv[2], &encoder, &decoder);
+            }
+            else{
+                printf("You have to enter also file_name to encode!\n");
+                return LACK_OF_FILES;
+            }
+        }
+        else if (!strcmp(argv[1], "-d")){
+            decoder.eval();
 
-        //process_data_encode(SIGNAL, &encoder, &decoder);
-        process_data_decode(WRITE, decode, &decoder);
-
-        fclose(decode);
-
-        sf_close(SIGNAL);
+            if (argc > 3){
+                FILE* decode = fopen(argv[2], "r");
+                open_sf_write(argv[3], &WRITE, &SFINFO_WRITE);
+                process_data_decode(WRITE, decode, &decoder);
+                fclose(decode);
+            }
+            else{
+                printf("You have to enter also file_name to decode and file_name to write decoded file!\n");
+                return LACK_OF_FILES;
+            }
+        }
+        else if (!strcmp(argv[1], "-h")){
+            printf("Enter -e and signal file_name to encode it.\n");
+            printf("Enter -d, file_name to decode and file_name to write decoded file.\n");
+        }
+        else{
+            printf("Enter -h to get help.\n");
+        }
 
         return 0;
     }
     else
     {
-        printf("Enter Signal file, encoder and decoder module! Also file to write and to decode!\n");
+        printf("Enter -h to get help.\n");
         return LACK_OF_FILES;
     }
 }
@@ -101,7 +121,7 @@ int open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info)
 {
     memset(sf_file_info, 0, sizeof(*sf_file_info));
 
-    sf_file_info->format = SF_FORMAT_WAV | SF_FORMAT_FLOAT;
+    sf_file_info->format = SF_FORMAT_WAV | SF_FORMAT_PCM_32;
     sf_file_info->channels = 2;
     sf_file_info->samplerate = 44100;
 
@@ -115,7 +135,7 @@ int open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info)
     return 0;
 }
 
-long long find_probability(int* data, size_t len)
+int find_mean(int* data, size_t len)
 {
     long long sum = 0;
 
@@ -233,7 +253,6 @@ void process_channel(float* data, torch::jit::script::Module* encoder, torch::ji
         fwrite(data     , sizeof(float), COMPRESSED_PARAMETERS, write);
         fwrite(&max_ampl, sizeof(float), 1                    , write);
     }
-
 }
 
 void write_loss(float* data, bit_stream* bs, FILE* output)
@@ -252,11 +271,33 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
     {
         for(int i = 0; i < BUFFER_LEN; i++) 
             loss[i] = data[i] * SHRT_MAX / max_loss;
-    }   
-           
-    long long mean = find_probability(loss, BUFFER_LEN);       
+    } 
 
-    pow_of_2 = 2048;
+    /*int mean = find_mean(loss, BUFFER_LEN);
+    pow_of_2 = 2;
+    int delta = 0;
+
+    while (delta >= 0 && mean != 0)
+    {
+        delta = 0;
+
+        for (int i = 0; i < BUFFER_LEN; i++)
+            encode_rice(pow_of_2, loss[i], bs);
+        delta += bs-> bit;
+        bs->bit = 0;
+        bs->len = 0;
+
+        pow_of_2 *= 2;
+        for (int i = 0; i < BUFFER_LEN; i++)
+            encode_rice(pow_of_2, loss[i], bs);
+        delta -= bs->bit;
+
+        bs->bit = 0;
+        bs->len = 0;
+    }*/
+    
+    pow_of_2 = 1 << (sizeof(int)*8 - __builtin_clz(find_mean(loss, BUFFER_LEN)));
+    pow_of_2 /= 2;
 
     for (int i = 0; i < BUFFER_LEN; i++)
         encode_rice(pow_of_2, loss[i], bs);
@@ -302,7 +343,7 @@ void save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, 
     }       
 }
 
-void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder)
+void process_data_encode(char* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder)
 {
     int    k = 0;
     int    size_to_read = BUFFER_LEN;
@@ -312,9 +353,14 @@ void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, to
     float  buffer2 [3*BUFFER_LEN/2] = {0};
     float* place_to_read = data1;
 
-    FILE* music = fopen("music.f1", "wb");
+    open_sf_read (input, &SIGNAL, &SFINFO_SIGNAL);
+    char output_file[strchr(input, '.') - input + 5];
+    strcpy(output_file                 , input );
+    strcpy(strchr(output_file, '.') + 1, "nlac");
 
-    while (sf_readf_float(input, place_to_read, size_to_read))
+    FILE* music = fopen(output_file, "wb");
+
+    while (sf_readf_float(SIGNAL, place_to_read, size_to_read))
     {   
         bit_stream bs;
         bit_stream_init(&bs);
@@ -347,6 +393,8 @@ void process_data_encode(SNDFILE* input, torch::jit::script::Module* encoder, to
 
         free(bs.buf);
     }
+
+    sf_close(SIGNAL);
 }
 
 void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* decoder)
