@@ -8,6 +8,7 @@ build
 noise
 *.nlac
 *.cmake
+*.png
 Makefile
 CMakeFiles/
 .vscode
