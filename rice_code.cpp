@@ -50,14 +50,13 @@ void encode_rice(size_t po2, int delta, bit_stream* bs) {
     }
 }
 
-void read_loss(FILE* file, float* scale, float* loss)
+void read_loss(FILE* file, float* loss)
 {
     int   po2, count, position, readcount;
     char  buffer = 0;
 
     po2 = count = position = 0;
 
-    fread(scale  , sizeof(float), 1, file);
     fread(&po2, sizeof(int)  , 1, file);
 
     while (count < BUFFER_LEN && readcount)
@@ -103,9 +102,8 @@ void read_loss(FILE* file, float* scale, float* loss)
     }
 }
 
-void print_loss(FILE* file, float scale, int po2, bit_stream* bs)
+void print_loss(FILE* file, int po2, bit_stream* bs)
 {   
-    fwrite(&scale, sizeof(float), 1, file);
     fwrite(&po2, sizeof(int), 1, file);
 
     size_t byte_to_read = bs->bit % 8 ? bs->bit / 8 + 1 : bs->bit / 8;
