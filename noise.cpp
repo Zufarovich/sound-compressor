@@ -44,6 +44,11 @@ void  bit_stream_init(bit_stream* bs);
 void  unzip(float* data, size_t len);
 void  zip(float* data, size_t len);
 
+void process_data_encode_new(char* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
+void save_loss_new(float* data, float* data1, bit_stream* bs, FILE* to_write);
+void process_data_decode_new(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* decoder);
+void decode_sample_new(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder);
+
 int main(int argc, char* argv[])
 {
     SIGNAL = NULL;
@@ -270,7 +275,7 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
     else
     {
         for(int i = 0; i < BUFFER_LEN; i++) 
-            loss[i] = data[i] * SHRT_MAX / max_loss;
+            loss[i] = data[i] * SHRT_MAX ;
     } 
 
     /*int mean = find_mean(loss, BUFFER_LEN);
@@ -297,12 +302,12 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
     }*/
     
     pow_of_2 = 1 << (sizeof(int)*8 - __builtin_clz(find_mean(loss, BUFFER_LEN)));
-    pow_of_2 /= 2;
+    //pow_of_2 /= 2;
 
     for (int i = 0; i < BUFFER_LEN; i++)
         encode_rice(pow_of_2, loss[i], bs);
 
-    print_loss(output, max_loss, pow_of_2, bs);
+    print_loss(output, pow_of_2, bs);
 }
 
 void decode_sample(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder)
@@ -409,7 +414,7 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
 
     while(readcount)
     {
-        float scale1, scale2, max_loss_ch1_1, max_loss_ch1_2, max_loss_ch2_1, max_loss_ch2_2;
+        float max_loss_ch1_1, max_loss_ch1_2, max_loss_ch2_1, max_loss_ch2_2;
         float loss1[BUFFER_LEN];
         float loss2[BUFFER_LEN];
 
@@ -420,12 +425,12 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
         readcount = fread(buf_channel1 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
         readcount = fread(&max_loss_ch1_2,                      sizeof(float), 1                    , file_to_decode);
 
-        read_loss(file_to_decode, &scale1, loss1);
+        read_loss(file_to_decode, loss1);
 
         readcount = fread(buf_channel2 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
         readcount = fread(&max_loss_ch2_2,                      sizeof(float), 1                    , file_to_decode);
 
-        read_loss(file_to_decode, &scale2, loss2);
+        read_loss(file_to_decode, loss2);
         
         decode_sample(saved_channel1               , buf_channel1                        , max_loss_ch1_1, decoder);
         decode_sample(saved_channel2               , buf_channel2                        , max_loss_ch2_1, decoder);
@@ -434,8 +439,8 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
 
         for (int i = 0; i < BUFFER_LEN; i++)
         {
-            loss1[i] = loss1[i] * scale1 / SHRT_MAX;
-            loss2[i] = loss2[i] * scale2 / SHRT_MAX;
+            loss1[i] = loss1[i] / SHRT_MAX;
+            loss2[i] = loss2[i] / SHRT_MAX;
         }
 
         for (int i = 0; i < BUFFER_LEN; i++)
@@ -451,4 +456,116 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
 
         sf_writef_float(output, save, BUFFER_LEN);
     }
+
+    sf_close(output);
+}
+
+void process_data_encode_new(char* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder)
+{
+    float  data1   [2*BUFFER_LEN] = {0};
+    float  data2   [BUFFER_LEN];
+    float  buffer1 [BUFFER_LEN] = {0};
+    float  buffer2 [BUFFER_LEN] = {0};
+
+    open_sf_read (input, &SIGNAL, &SFINFO_SIGNAL);
+    char output_file[strchr(input, '.') - input + 5];
+    strcpy(output_file                 , input );
+    strcpy(strchr(output_file, '.') + 1, "nlac");
+
+    FILE* music = fopen(output_file, "wb");
+
+    while (sf_readf_float(SIGNAL, data1, BUFFER_LEN))
+    {   
+        bit_stream bs;
+        bit_stream_init(&bs);
+
+        zip(data1, sizeof(data1)/sizeof(float));
+
+        memcpy(data2, data1 , BUFFER_LEN*sizeof(float));
+        process_channel(data2, encoder, decoder, music);
+        save_loss_new(data2, data1                 , &bs, music);     
+
+        memcpy(data2, data1 + BUFFER_LEN , BUFFER_LEN*sizeof(float));
+        process_channel(data2, encoder, decoder, music); 
+        save_loss_new(data2, data1 + BUFFER_LEN, &bs, music);     
+
+        free(bs.buf);
+    }
+
+    sf_close(SIGNAL);
+}
+
+void save_loss_new(float* data, float* data1, bit_stream* bs, FILE* to_write)
+{
+    float loss[BUFFER_LEN];
+
+    for (int i = 0; i < BUFFER_LEN; i++)
+        loss[i] = data[i] - data1[i];
+
+    write_loss(loss, bs, to_write);
+
+    bs->bit = 0;
+    bs->len = 0;       
+}
+
+void process_data_decode_new(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* decoder)
+{
+    int readcount = 1;
+
+    float buf_channel1  [2*COMPRESSED_PARAMETERS];
+    float buf_channel2  [2*COMPRESSED_PARAMETERS];
+    float saved_channel1[3*BUFFER_LEN/2] = {0};
+    float saved_channel2[3*BUFFER_LEN/2] = {0};
+    float save          [2*BUFFER_LEN  ] = {0};
+
+    while(readcount)
+    {
+        float max_loss_ch1, max_loss_ch2;
+        float loss1[BUFFER_LEN];
+        float loss2[BUFFER_LEN];
+
+        readcount = fread(buf_channel1,                         sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+        readcount = fread(&max_loss_ch1,                        sizeof(float), 1                    , file_to_decode);
+
+        read_loss(file_to_decode, loss1);
+
+        readcount = fread(buf_channel2,                         sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+        readcount = fread(&max_loss_ch2,                        sizeof(float), 1                    , file_to_decode);
+
+        read_loss(file_to_decode, loss2);
+        
+        decode_sample_new(saved_channel1               , buf_channel1                        , max_loss_ch1, decoder);
+        decode_sample_new(saved_channel2               , buf_channel2                        , max_loss_ch2, decoder);
+
+        for (int i = 0; i < BUFFER_LEN; i++)
+        {
+            loss1[i] = loss1[i] / SHRT_MAX;
+            loss2[i] = loss2[i] / SHRT_MAX;
+        }
+
+        for (int i = 0; i < BUFFER_LEN; i++)
+        {
+            saved_channel1[i] -= loss1[i];
+            saved_channel2[i] -= loss2[i];
+            save[2*i]          = saved_channel1[i];
+            save[2*i + 1]      = saved_channel2[i];
+        }
+
+        sf_writef_float(output, save, BUFFER_LEN);
+    }
+
+    sf_close(output);
+}
+
+void decode_sample_new(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder)
+{
+    torch::Tensor inputs = torch::empty({1, COMPRESSED_PARAMETERS});
+
+    for (int i = 0; i < COMPRESSED_PARAMETERS; i++)
+        inputs[0][i] = input[i];
+
+    auto output = decoder->forward({inputs}).toTensor();
+
+    for (int i = 0; i < BUFFER_LEN; i++)
+        result[i] = output[0][i].item<float>() * max_ampl;
 }
