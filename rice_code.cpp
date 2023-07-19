@@ -4,7 +4,7 @@
 
 #define check_end if (!(position % 8)) readcount = fread(&buffer, sizeof(char), 1, file)
 #define bit_readen (buffer & (1 << (position % 8)))
-#define BUFFER_LEN 1024
+#define BUFFER_LEN 2048
 
 typedef struct _bit_stream {
     char*  buf;

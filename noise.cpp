@@ -13,8 +13,9 @@
 #include <vector>
 #include "rice_code.h"
 
-#define DISCRETE_FACTOR INT_MAX
-#define BUFFER_LEN 1024
+#define DISCRETE_FACTOR_16 SHRT_MAX
+#define BUFFER_LEN 2048
+#define CROSS_FADE 204
 #define COMPRESSED_PARAMETERS 64
 #define MAX_CHANNELS 6
 #define ERROR_OPEN_INPUT -1
@@ -49,6 +50,10 @@ void save_loss_new(float* data, float* data1, bit_stream* bs, FILE* to_write);
 void process_data_decode_new(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* decoder);
 void decode_sample_new(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder);
 
+void process_data_encode_cross_fade(char* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
+void process_data_decode_cross_fade(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* decoder);
+void save_loss_cross_fade(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write);
+
 int main(int argc, char* argv[])
 {
     SIGNAL = NULL;
@@ -57,16 +62,16 @@ int main(int argc, char* argv[])
     if(argc > 1)
     {
         torch::NoGradGuard no_grad;
-        torch::jit::script::Module decoder = torch::jit::load("decoder.pth");
+        torch::jit::script::Module decoder = torch::jit::load("decoder1.pth");
 
         if (!strcmp(argv[1], "-e")){
-            torch::jit::script::Module encoder = torch::jit::load("encoder.pth");
+            torch::jit::script::Module encoder = torch::jit::load("encoder1.pth");
 
             encoder.eval();
             decoder.eval();
 
             if (argc > 2){
-                process_data_encode(argv[2], &encoder, &decoder);
+                process_data_encode_cross_fade(argv[2], &encoder, &decoder);
             }
             else{
                 printf("You have to enter also file_name to encode!\n");
@@ -79,7 +84,7 @@ int main(int argc, char* argv[])
             if (argc > 3){
                 FILE* decode = fopen(argv[2], "r");
                 open_sf_write(argv[3], &WRITE, &SFINFO_WRITE);
-                process_data_decode(WRITE, decode, &decoder);
+                process_data_decode_cross_fade(WRITE, decode, &decoder);
                 fclose(decode);
             }
             else{
@@ -275,7 +280,7 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
     else
     {
         for(int i = 0; i < BUFFER_LEN; i++) 
-            loss[i] = data[i] * SHRT_MAX ;
+            loss[i] = data[i] * DISCRETE_FACTOR_16 ;
     } 
 
     /*int mean = find_mean(loss, BUFFER_LEN);
@@ -439,8 +444,8 @@ void process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::scri
 
         for (int i = 0; i < BUFFER_LEN; i++)
         {
-            loss1[i] = loss1[i] / SHRT_MAX;
-            loss2[i] = loss2[i] / SHRT_MAX;
+            loss1[i] = loss1[i] / DISCRETE_FACTOR_16;
+            loss2[i] = loss2[i] / DISCRETE_FACTOR_16;
         }
 
         for (int i = 0; i < BUFFER_LEN; i++)
@@ -539,8 +544,8 @@ void process_data_decode_new(SNDFILE* output, FILE* file_to_decode, torch::jit::
 
         for (int i = 0; i < BUFFER_LEN; i++)
         {
-            loss1[i] = loss1[i] / SHRT_MAX;
-            loss2[i] = loss2[i] / SHRT_MAX;
+            loss1[i] = loss1[i] / DISCRETE_FACTOR_16;
+            loss2[i] = loss2[i] / DISCRETE_FACTOR_16;
         }
 
         for (int i = 0; i < BUFFER_LEN; i++)
@@ -568,4 +573,165 @@ void decode_sample_new(float* result, float* input, float max_ampl, torch::jit::
 
     for (int i = 0; i < BUFFER_LEN; i++)
         result[i] = output[0][i].item<float>() * max_ampl;
+}
+
+void process_data_encode_cross_fade(char* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder)
+{
+    int    k = 0;
+    float  data1   [4*BUFFER_LEN]   = {0};
+    float  data2   [BUFFER_LEN];
+    float  buffer1 [2*BUFFER_LEN - CROSS_FADE] = {0};
+    float  buffer2 [2*BUFFER_LEN - CROSS_FADE] = {0};
+    float* place_to_read = data1;
+
+    open_sf_read (input, &SIGNAL, &SFINFO_SIGNAL);
+    char output_file[strchr(input, '.') - input + 5];
+    strcpy(output_file                 , input );
+    strcpy(strchr(output_file, '.') + 1, "nlac");
+
+    FILE* music = fopen(output_file, "wb");
+
+    while (sf_readf_float(SIGNAL, place_to_read, BUFFER_LEN))
+    {   
+        bit_stream bs;
+        bit_stream_init(&bs);
+        k++;
+
+        zip(data1, sizeof(data1)/sizeof(float));
+
+        memcpy(data2, data1 + ((k + 1) % 2)*BUFFER_LEN               , BUFFER_LEN*sizeof(float));
+        process_channel(data2, encoder, decoder, music);
+        save_loss_cross_fade(k, buffer1, data2, data1                              , &bs, music);     
+
+        memcpy(data2, data1 + 2*BUFFER_LEN + ((k + 1) % 2)*BUFFER_LEN, BUFFER_LEN*sizeof(float));
+        process_channel(data2, encoder, decoder, music); 
+        save_loss_cross_fade(k, buffer2, data2, data1 + 2*BUFFER_LEN               , &bs, music);     
+
+        unzip(data1, sizeof(data1)/sizeof(float));
+
+        if (k != 1)
+        {
+            memcpy(data1, data1 + 2*BUFFER_LEN, 2*BUFFER_LEN*sizeof(float));
+            place_to_read = data1 + 2*BUFFER_LEN;
+        }
+
+        free(bs.buf);
+    }
+
+    sf_close(SIGNAL);
+}
+
+void save_loss_cross_fade(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write)
+{
+    if (k == 1)
+    {
+        for (int i = 0; i < BUFFER_LEN; i++)
+            buffer[i] += data[i];
+    }
+    else
+    {
+        for (int i = 0; i < BUFFER_LEN; i++)
+            buffer[BUFFER_LEN - CROSS_FADE + i] += data[i];
+
+        float loss[BUFFER_LEN];
+
+        for (int i = 0; i < BUFFER_LEN; i++)
+            loss[i] = buffer[i] - data1[i];
+
+        write_loss(loss, bs, to_write);
+        memcpy(buffer, buffer + BUFFER_LEN - CROSS_FADE, sizeof(float)*BUFFER_LEN);
+        memset(buffer + BUFFER_LEN, 0, sizeof(float)*(BUFFER_LEN - CROSS_FADE));
+
+        bs->bit = 0;
+        bs->len = 0;
+    }
+}
+
+void process_data_decode_cross_fade(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* decoder)
+{
+    int readcount = 1;
+
+    float buf_channel1  [2*COMPRESSED_PARAMETERS];
+    float buf_channel2  [2*COMPRESSED_PARAMETERS];
+    float saved_channel1[2*BUFFER_LEN - CROSS_FADE] = {0};
+    float saved_channel2[2*BUFFER_LEN - CROSS_FADE] = {0};
+    float save          [2*BUFFER_LEN] = {0};
+    float loss1         [BUFFER_LEN];
+    float loss2         [BUFFER_LEN];
+    float max_loss_ch1_1, max_loss_ch1_2, max_loss_ch2_1, max_loss_ch2_2;
+
+    readcount = fread(buf_channel1,                         sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+    readcount = fread(&max_loss_ch1_1,                      sizeof(float), 1                    , file_to_decode);
+    readcount = fread(buf_channel2,                         sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+    readcount = fread(&max_loss_ch2_1,                      sizeof(float), 1                    , file_to_decode);
+    readcount = fread(buf_channel1 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+    readcount = fread(&max_loss_ch1_2,                      sizeof(float), 1                    , file_to_decode);
+
+    read_loss(file_to_decode, loss1);
+
+    readcount = fread(buf_channel2 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+    readcount = fread(&max_loss_ch2_2,                      sizeof(float), 1                    , file_to_decode);
+
+    read_loss(file_to_decode, loss2);
+    
+    decode_sample(saved_channel1                          , buf_channel1                        , max_loss_ch1_1, decoder);
+    decode_sample(saved_channel2                          , buf_channel2                        , max_loss_ch2_1, decoder);
+    decode_sample(saved_channel1 + BUFFER_LEN - CROSS_FADE, buf_channel1 + COMPRESSED_PARAMETERS, max_loss_ch1_2, decoder);
+    decode_sample(saved_channel2 + BUFFER_LEN - CROSS_FADE, buf_channel2 + COMPRESSED_PARAMETERS, max_loss_ch2_2, decoder);
+
+    for (int i = 0; i < BUFFER_LEN; i++)
+    {
+        loss1[i] = loss1[i] / DISCRETE_FACTOR_16;
+        loss2[i] = loss2[i] / DISCRETE_FACTOR_16;
+    }
+
+    for (int i = 0; i < BUFFER_LEN; i++)
+    {
+        save[2*i]          = saved_channel1[i] - loss1[i];
+        save[2*i + 1]      = saved_channel2[i] - loss2[i];
+    }
+
+    memcpy(saved_channel1, saved_channel1 + BUFFER_LEN - CROSS_FADE, sizeof(float)*BUFFER_LEN);
+    memset(saved_channel1 + BUFFER_LEN, 0, sizeof(float)*(BUFFER_LEN - CROSS_FADE));
+    memcpy(saved_channel2, saved_channel2 + BUFFER_LEN - CROSS_FADE, sizeof(float)*BUFFER_LEN);
+    memset(saved_channel2 + BUFFER_LEN, 0, sizeof(float)*(BUFFER_LEN - CROSS_FADE));
+
+    sf_writef_float(output, save, BUFFER_LEN);
+
+    while(readcount)
+    {
+        readcount = fread(buf_channel1 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+        readcount = fread(&max_loss_ch1_2,                      sizeof(float), 1                    , file_to_decode);
+
+        read_loss(file_to_decode, loss1);
+
+        readcount = fread(buf_channel2 + COMPRESSED_PARAMETERS, sizeof(float), COMPRESSED_PARAMETERS, file_to_decode);
+        readcount = fread(&max_loss_ch2_2,                      sizeof(float), 1                    , file_to_decode);
+
+        read_loss(file_to_decode, loss2);
+        
+        decode_sample(saved_channel1 + BUFFER_LEN - CROSS_FADE, buf_channel1 + COMPRESSED_PARAMETERS, max_loss_ch1_2, decoder);
+        decode_sample(saved_channel2 + BUFFER_LEN - CROSS_FADE, buf_channel2 + COMPRESSED_PARAMETERS, max_loss_ch2_2, decoder);
+
+        for (int i = 0; i < BUFFER_LEN; i++)
+        {
+            loss1[i] = loss1[i] / DISCRETE_FACTOR_16;
+            loss2[i] = loss2[i] / DISCRETE_FACTOR_16;
+        }
+
+        for (int i = 0; i < BUFFER_LEN; i++)
+        {
+            save[2*i]          = saved_channel1[i] - loss1[i];
+            save[2*i + 1]      = saved_channel2[i] - loss2[i];
+        }
+
+        memcpy(saved_channel1, saved_channel1 + BUFFER_LEN - CROSS_FADE, sizeof(float)*BUFFER_LEN);
+        memset(saved_channel1 + BUFFER_LEN, 0, sizeof(float)*(BUFFER_LEN - CROSS_FADE));
+        memcpy(saved_channel2, saved_channel2 + BUFFER_LEN - CROSS_FADE, sizeof(float)*BUFFER_LEN);
+        memset(saved_channel2 + BUFFER_LEN, 0, sizeof(float)*(BUFFER_LEN - CROSS_FADE));
+
+        sf_writef_float(output, save, BUFFER_LEN);
+    }
+
+    sf_close(output);
 }
