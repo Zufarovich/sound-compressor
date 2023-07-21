@@ -1,3 +1,4 @@
+#include <stdint.h>
 #include <stdio.h>
 #include <stdlib.h>
 #include <cstring>
@@ -50,14 +51,16 @@ void encode_rice(size_t po2, int delta, bit_stream* bs) {
     }
 }
 
-void read_loss(FILE* file, float* loss)
+void read_loss(FILE* file, float* loss, float* scale)
 {
-    int   po2, count, position, readcount;
-    char  buffer = 0;
+    int     count, position, readcount;
+    char    buffer = 0;
+    uint8_t po2;
 
     po2 = count = position = 0;
 
-    fread(&po2, sizeof(int)  , 1, file);
+    fread(&po2, sizeof(uint8_t)  , 1, file);
+    fread(scale, sizeof(float), 1, file);
 
     while (count < BUFFER_LEN && readcount)
     {   
@@ -79,7 +82,7 @@ void read_loss(FILE* file, float* loss)
         }
 
         int current_po2 = 1;
-        int save_po2 = po2;
+        uint8_t save_po2 = po2;
         int modulo = 0;
 
         while (save_po2 - 1 && readcount)
@@ -102,9 +105,10 @@ void read_loss(FILE* file, float* loss)
     }
 }
 
-void print_loss(FILE* file, int po2, bit_stream* bs)
+void print_loss(FILE* file, uint8_t po2, bit_stream* bs, float scale)
 {   
-    fwrite(&po2, sizeof(int), 1, file);
+    fwrite(&po2, sizeof(uint8_t), 1, file);
+    fwrite(&scale, sizeof(float), 1, file);
 
     size_t byte_to_read = bs->bit % 8 ? bs->bit / 8 + 1 : bs->bit / 8;
 
