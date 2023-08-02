@@ -29,7 +29,7 @@ After you installed all required libraries, building and testing sound_comressor
 
 ```
 make
-./noise [option] [required file names or paths]
+./compressor [option] [required file names or paths]
 ```
 
 | Option | Required file names or paths| result |
