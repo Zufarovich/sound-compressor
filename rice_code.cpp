@@ -2,17 +2,10 @@
 #include <stdio.h>
 #include <stdlib.h>
 #include <cstring>
+#include "rice_code.h"
 
 #define check_end if (!(position % 8)) readcount = fread(&buffer, sizeof(char), 1, file)
 #define bit_readen (buffer & (1 << (position % 8)))
-#define BUFFER_LEN 2048
-
-typedef struct _bit_stream {
-    char*  buf;
-    size_t len;
-    size_t cap;
-    size_t bit;
-} bit_stream;
 
 void bit_stream_init(bit_stream* bs) {
     bs->buf = (char*)malloc(1024);
@@ -55,11 +48,11 @@ void read_loss(FILE* file, float* loss, float* scale)
 {
     int     count, position, readcount;
     char    buffer = 0;
-    uint8_t po2;
+    short po2;
 
     po2 = count = position = 0;
 
-    fread(&po2, sizeof(uint8_t)  , 1, file);
+    fread(&po2, sizeof(short)  , 1, file);
     fread(scale, sizeof(float), 1, file);
 
     while (count < BUFFER_LEN && readcount)
@@ -82,7 +75,7 @@ void read_loss(FILE* file, float* loss, float* scale)
         }
 
         int current_po2 = 1;
-        uint8_t save_po2 = po2;
+        short save_po2 = po2;
         int modulo = 0;
 
         while (save_po2 - 1 && readcount)
@@ -105,9 +98,9 @@ void read_loss(FILE* file, float* loss, float* scale)
     }
 }
 
-void print_loss(FILE* file, uint8_t po2, bit_stream* bs, float scale)
+void print_loss(FILE* file, short po2, bit_stream* bs, float scale)
 {   
-    fwrite(&po2, sizeof(uint8_t), 1, file);
+    fwrite(&po2, sizeof(short), 1, file);
     fwrite(&scale, sizeof(float), 1, file);
 
     size_t byte_to_read = bs->bit % 8 ? bs->bit / 8 + 1 : bs->bit / 8;
