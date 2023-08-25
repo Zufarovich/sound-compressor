@@ -11,11 +11,10 @@
 #include <stdint.h>
 #include <stdbool.h>
 #include <torch/script.h>
-#include <vector>
 #include "rice_code.h"
 
 #define DISCRETE_FACTOR_16 256 
-#define CROSS_FADE 128
+#define CROSS_FADE 32 
 #define COMPRESSED_PARAMETERS 64
 #define MAX_CHANNELS 6
 #define ERROR_OPEN_INPUT -1
@@ -45,11 +44,6 @@ void  bit_stream_init(bit_stream* bs);
 void  unzip(float* data, size_t len);
 void  zip(float* data, size_t len);
 
-void process_data_encode_new(char* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
-void save_loss_new(float* data, float* data1, bit_stream* bs, FILE* to_write);
-void process_data_decode_new(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* decoder);
-void decode_sample_new(float* result, float* input, float max_ampl, torch::jit::script::Module* decoder);
-
 void process_data_encode_cross_fade(char* input, torch::jit::script::Module* encoder, torch::jit::script::Module* decoder);
 void process_data_decode_cross_fade(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* decoder);
 void save_loss_cross_fade(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write);
@@ -74,7 +68,7 @@ int main(int argc, char* argv[])
                 process_data_encode_cross_fade(argv[2], &encoder, &decoder);
             }
             else{
-                printf("You have to enter also file_name to encode!\n");
+                printf("\033[91mYou have to enter also file_name to encode!\033[0m\n");
                 return LACK_OF_FILES;
             }
         }
@@ -88,7 +82,7 @@ int main(int argc, char* argv[])
                 fclose(decode);
             }
             else{
-                printf("You have to enter also file_name to decode and file_name to write decoded file!\n");
+                printf("\033[91mYou have to enter also file_name to decode and file_name to write decoded file!\033[0m\n");
                 return LACK_OF_FILES;
             }
         }
@@ -481,7 +475,7 @@ void process_data_encode_cross_fade(char* input, torch::jit::script::Module* enc
     strcpy(output_file                 , input );
     strcpy(strchr(output_file, '.') + 1, "nlac");
 
-    FILE* music = fopen(output_file, "wb");
+	FILE* music = fopen(output_file, "wb");
 
     while (sf_readf_float(SIGNAL, place_to_read, BUFFER_LEN))
     {   
