@@ -289,7 +289,6 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
             encode_rice(pow_of_2, loss[i], bs);
         delta += bs-> bit;
         bs->bit = 0;
-        bs->len = 0;
 
         pow_of_2 *= 2;
         for (int i = 0; i < BUFFER_LEN; i++)
@@ -297,7 +296,6 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
         delta -= bs->bit;
 
         bs->bit = 0;
-        bs->len = 0;
     }
 
     //pow_of_2 = 1 << (sizeof(long)*8 - __builtin_clz(find_mean(loss, BUFFER_LEN)));
@@ -344,7 +342,6 @@ void save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, 
         move_third_part(buffer, 3*BUFFER_LEN/2);
 
         bs->bit = 0;
-        bs->len = 0;
     }       
 }
 
@@ -529,7 +526,6 @@ void save_loss_cross_fade(int k, float* buffer, float* data, float* data1, bit_s
         memset(buffer + BUFFER_LEN, 0, sizeof(float)*(BUFFER_LEN - CROSS_FADE));
 
         bs->bit = 0;
-        bs->len = 0;
     }
 }
 

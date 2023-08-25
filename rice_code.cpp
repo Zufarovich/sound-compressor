@@ -10,7 +10,6 @@
 void bit_stream_init(bit_stream* bs) {
     bs->buf = (char*)malloc(1024); 
     memset(bs->buf, '\0', 1024);
-    bs->len = 0;
     bs->cap = 1024;
     bs->bit = 0;
 }
@@ -24,7 +23,6 @@ void bit_stream_set(bit_stream* bs, int set) {
         memset(bs->buf + bs->cap/2, '\0', bs->cap/2);
     }
     bs->buf[byte] = set ? bs->buf[byte] | (1<<bit) : bs->buf[byte] & ~(1<<bit);
-    if ( bs->bit > bs->len) bs->len = bs->bit;
     bs->bit++;
 }
 

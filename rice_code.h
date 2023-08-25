@@ -5,7 +5,6 @@
 
 typedef struct _bit_stream {
 	char*  buf;
-    size_t len;
     size_t cap;
     size_t bit;
 } bit_stream;
