@@ -8,7 +8,7 @@
 #define bit_readen (buffer & (1 << (position % 8)))
 
 void bit_stream_init(bit_stream* bs) {
-    bs->buf = (char*)malloc(1024);
+    bs->buf = (char*)malloc(1024); 
     memset(bs->buf, '\0', 1024);
     bs->len = 0;
     bs->cap = 1024;
