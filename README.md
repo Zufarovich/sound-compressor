@@ -4,7 +4,7 @@
 
 It uses neural network to approximate wave and then uses Rice coding for loss. 
 
-Current version compress the file a little bit, but training neural network is in progress.
+Current version compress the file around 1.5-2 times, but training neural network is in progress.
 
 # Installation
 
