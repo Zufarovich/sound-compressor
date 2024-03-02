@@ -4,7 +4,7 @@
 
 It uses neural network to approximate wave and then uses Rice coding for loss. 
 
-Current version compress the file around 1.5-2 times, but training neural network is in progress. Average compression is around 1.8 times.
+Current version compress the file around 1.5-2 times, but training neural network is in progress. Average compression is around 1.8 times on test music.
 
 # Installation
 
