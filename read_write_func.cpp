@@ -1,5 +1,6 @@
 #include <stdio.h>
 #include <stdlib.h>
+#include <string.h>
 #include "read_write_func.hpp"
 
 int open_sf_read(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info)
