@@ -2,7 +2,6 @@
 #pragma GCC target("avx2")
 
 #include <stdio.h>
-#include <sndfile.h>
 #include <stdlib.h>
 #include <cassert>
 #include <cmath>
@@ -12,14 +11,11 @@
 #include <stdbool.h>
 #include <torch/script.h>
 #include "rice_code.h"
+#include "read_write_func.hpp"
 
 #define DISCRETE_FACTOR_16 256 
 #define CROSS_FADE 32 
 #define COMPRESSED_PARAMETERS 64
-#define MAX_CHANNELS 6
-#define ERROR_OPEN_INPUT -1
-#define ERROR_OPEN_OUTPUT -2
-#define EXTRA_CHANNELS -3
 #define LACK_OF_FILES -4
 #define _USE_MATH_DEFINES
 
@@ -34,8 +30,6 @@ void  decode_sample(float* result, float* input, float max_ampl, torch::jit::scr
 void  process_data_decode(SNDFILE* output, FILE* file_to_decode, torch::jit::script::Module* module);
 void  save_loss(int k, float* buffer, float* data, float* data1, bit_stream* bs, FILE* to_write);
 void  window_hann(float* data, float* transformed_data, int window_size);
-int   open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info);
-int   open_sf_read(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info);
 void  move_second_part(float* data, size_t len);
 void  move_third_part(float* data, size_t len);
 float find_max(float* loss, size_t len);
@@ -101,42 +95,6 @@ int main(int argc, char* argv[])
         printf("Enter -h to get help.\n");
         return LACK_OF_FILES;
     }
-}
-
-int open_sf_read(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info)
-{
-    if (!(*sf_file = sf_open(file, SFM_READ, sf_file_info)))
-    {
-        printf("%s\n", sf_strerror(*sf_file));
-        printf("Unable to open the input file\n");
-        return ERROR_OPEN_INPUT;
-    }
-
-    if (sf_file_info->channels > MAX_CHANNELS)
-    {
-        printf("Not able to process more than %d channels\n", MAX_CHANNELS);
-        return EXTRA_CHANNELS;
-    }
-    
-    return 0;
-}
-
-int open_sf_write(char* file, SNDFILE** sf_file, SF_INFO* sf_file_info)
-{
-    memset(sf_file_info, 0, sizeof(*sf_file_info));
-
-    sf_file_info->format = SF_FORMAT_WAV | SF_FORMAT_PCM_32;
-    sf_file_info->channels = 2;
-    sf_file_info->samplerate = 44100;
-
-    if (!(*sf_file = sf_open(file, SFM_WRITE, sf_file_info)))
-    {
-        printf("%s\n", sf_strerror(*sf_file));
-        printf("Unable to open the input file\n");
-        return ERROR_OPEN_INPUT;
-    }
-
-    return 0;
 }
 
 int find_mean(int* data, size_t len)
@@ -276,6 +234,11 @@ void write_loss(float* data, bit_stream* bs, FILE* output)
         for(int i = 0; i < BUFFER_LEN; i++) 
             loss[i] = data[i] * DISCRETE_FACTOR_16 / max_loss ;
     } 
+
+    /*  For exploring distibution of loss
+    for(int i = 0; i < BUFFER_LEN; i++)
+        printf("%d\n", loss[i])
+    */
 
     int mean = find_mean(loss, BUFFER_LEN);
     pow_of_2 = 2;

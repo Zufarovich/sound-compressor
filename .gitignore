@@ -12,3 +12,5 @@ compressor
 Makefile
 CMakeFiles/
 .vscode
+music/
+epoch_states/
