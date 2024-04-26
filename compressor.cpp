@@ -47,19 +47,19 @@ int main(int argc, char* argv[])
     SIGNAL = NULL;
     memset(&SFINFO_SIGNAL, 0, sizeof(SFINFO_SIGNAL));
 
-    if(argc > 1)
+    if(argc > 3)
     {
         torch::NoGradGuard no_grad;
-        torch::jit::script::Module decoder = torch::jit::load("decoder1.pth");
+        torch::jit::script::Module decoder = torch::jit::load(argv[3]);
 
         if (!strcmp(argv[1], "-e")){
-            torch::jit::script::Module encoder = torch::jit::load("encoder1.pth");
+            torch::jit::script::Module encoder = torch::jit::load(argv[2]);
 
             encoder.eval();
             decoder.eval();
 
-            if (argc > 2){
-                process_data_encode_cross_fade(argv[2], &encoder, &decoder);
+            if (argc > 4){
+                process_data_encode_cross_fade(argv[4], &encoder, &decoder);
             }
             else{
                 printf("\033[91mYou have to enter also file_name to encode!\033[0m\n");
@@ -69,9 +69,9 @@ int main(int argc, char* argv[])
         else if (!strcmp(argv[1], "-d")){
             decoder.eval();
 
-            if (argc > 3){
-                FILE* decode = fopen(argv[2], "r");
-                open_sf_write(argv[3], &WRITE, &SFINFO_WRITE);
+            if (argc > 5){
+                FILE* decode = fopen(argv[4], "r");
+                open_sf_write(argv[5], &WRITE, &SFINFO_WRITE);
                 process_data_decode_cross_fade(WRITE, decode, &decoder);
                 fclose(decode);
             }
@@ -79,10 +79,6 @@ int main(int argc, char* argv[])
                 printf("\033[91mYou have to enter also file_name to decode and file_name to write decoded file!\033[0m\n");
                 return LACK_OF_FILES;
             }
-        }
-        else if (!strcmp(argv[1], "-h")){
-            printf("Enter -e and signal file_name to encode it.\n");
-            printf("Enter -d, file_name to decode and file_name to write decoded file.\n");
         }
         else{
             printf("Enter -h to get help.\n");
@@ -92,7 +88,10 @@ int main(int argc, char* argv[])
     }
     else
     {
-        printf("Enter -h to get help.\n");
+        if (!strcmp(argv[1], "-h")){
+            printf("Enter -e, model of encoder, decoder neural network(.pth files) and signal file_name to encode it.\n");
+            printf("Enter -d, model of encoder, decoder neural network(.pth files), file_name to decode and file_name to write decoded file.\n");
+        }
         return LACK_OF_FILES;
     }
 }
